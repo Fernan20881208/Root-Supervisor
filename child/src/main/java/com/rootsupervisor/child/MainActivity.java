@@ -2,6 +2,9 @@ package com.rootsupervisor.child;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.provider.Settings;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.projection.MediaProjectionManager;
@@ -22,9 +25,15 @@ public class MainActivity extends Activity {
     private static final int REQUEST_CAPTURE = 101;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private TextView status;
+    private TextView protectionStatus;
+    private TextView usageOutput;
     private final Runnable update = new Runnable() {
         @Override public void run() {
             if (status != null) status.setText(CaptureService.getStatus());
+            if (protectionStatus != null)
+                protectionStatus.setText(isAdminActive()
+                    ? "Administrador de dispositivo: ACTIVO. Para desinstalar, primero debe desactivarse desde Ajustes."
+                    : "Administrador de dispositivo: INACTIVO. La app se puede desinstalar normalmente.");
             ui.postDelayed(this, 1000);
         }
     };
@@ -53,8 +62,42 @@ public class MainActivity extends Activity {
             status.setText("Deteniendo…");
         });
         root.addView(stop);
+        root.addView(label("Administración parental visible", 21, 0xffe6dbff));
+        root.addView(label("Protección opcional: Android solicitará permiso explícito para activar administrador de dispositivo. Esto añade un paso a la desinstalación, pero puede desactivarse en Ajustes. No impide restablecer el teléfono.", 14, Color.WHITE));
+        protectionStatus = label("", 15, 0xffd9c4ff);
+        root.addView(protectionStatus);
+        Button admin = button("Solicitar administración de dispositivo");
+        admin.setOnClickListener(v -> requestDeviceAdmin());
+        root.addView(admin);
+        root.addView(label("Estadísticas de uso (solo visibles en este teléfono)", 18, 0xffe6dbff));
+        Button grantStats = button("Abrir acceso a estadísticas de uso");
+        grantStats.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
+        root.addView(grantStats);
+        Button viewStats = button("Ver 5 apps con mayor uso en 24 horas");
+        viewStats.setOnClickListener(v -> usageOutput.setText(UsageSummary.lastDay(this)));
+        root.addView(viewStats);
+        usageOutput = label("Las estadísticas permanecen en el teléfono. No se envían al visor Parent.", 14, 0xffd9c4ff);
+        root.addView(usageOutput);
         root.addView(label("Para ver la sesión, conecta ambos teléfonos a la misma red Wi-Fi y escribe la IP y el código mostrados arriba en Root Supervisor Parent. Las imágenes viajan cifradas y no se guardan.", 14, 0xffc4bdd2));
         setContentView(scroll);
+    }
+
+    private boolean isAdminActive() {
+        DevicePolicyManager policy = (DevicePolicyManager)getSystemService(Context.DEVICE_POLICY_SERVICE);
+        return policy != null && policy.isAdminActive(new ComponentName(this, SupervisorAdminReceiver.class));
+    }
+
+    private void requestDeviceAdmin() {
+        if (isAdminActive()) {
+            protectionStatus.setText("El administrador ya está activo. Se puede administrar desde Ajustes.");
+            return;
+        }
+        Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+        intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                new ComponentName(this, SupervisorAdminReceiver.class));
+        intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                "Esta opción opcional identifica la supervisión y requiere desactivarla desde Ajustes antes de desinstalarla. No habilita capturas secretas.");
+        startActivity(intent);
     }
 
     private void startCapture() {
